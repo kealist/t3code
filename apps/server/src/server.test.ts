@@ -5615,6 +5615,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("creates a project from just a name in the newProjectsDirectory setting", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const newProjectsDirectory = path.join(yield* fileSystem.makeTempDirectory(), "code");
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, newProjectsDirectory }),
+          },
+          orchestrationEngine: {
+            dispatch: () => Effect.succeed({ sequence: 1 }),
+          },
+          gitVcsDriver: {
+            readConfigValue: () => Effect.succeed(null),
+            execute: () =>
+              Effect.succeed({
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              }),
+          },
+        },
+      });
+
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          Effect.gen(function* () {
+            const config = yield* client[WS_METHODS.serverGetConfig]({});
+            const result = yield* client[WS_METHODS.projectsCreateNew]({ name: "Pinball Stats" });
+
+            assert.equal(config.newProjectsRoot, newProjectsDirectory);
+            assert.equal(result.workspaceRoot, path.join(newProjectsDirectory, "pinball-stats"));
+            assert.isTrue(yield* fileSystem.exists(path.join(result.workspaceRoot, "README.md")));
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("advertises the usable file manager and its reveal label", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({

@@ -124,6 +124,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { expandHomePathWith } from "./pathExpansion.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -2023,11 +2024,20 @@ const makeWsRpcLayer = (
       // Projects started from just a name live beside Scratch and worktrees,
       // away from folders the user organizes by hand. A nested repository is
       // fine here (unlike Scratch) because each project gets its own `git init`.
-      const newProjectsRoot = path.resolve(config.baseDir, "projects");
+      const defaultNewProjectsRoot = path.resolve(config.baseDir, "projects");
+      // The newProjectsDirectory setting moves them somewhere the user picks.
+      const resolveNewProjectsRoot = serverSettings.getSettings.pipe(
+        Effect.map((settings) =>
+          settings.newProjectsDirectory === ""
+            ? defaultNewProjectsRoot
+            : path.resolve(expandHomePathWith(settings.newProjectsDirectory, path)),
+        ),
+        Effect.orElseSucceed(() => defaultNewProjectsRoot),
+      );
       const createNewProject = (input: ProjectCreateNewInput) =>
         Effect.gen(function* () {
           const folder = yield* NewProject.createNewProjectFolder({
-            root: newProjectsRoot,
+            root: yield* resolveNewProjectsRoot,
             name: input.name,
           }).pipe(
             Effect.mapError(
@@ -2127,7 +2137,7 @@ const makeWsRpcLayer = (
             threadSnapshotPagination: true,
             reasoningMessages: true,
             ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
-            newProjectsRoot,
+            newProjectsRoot: yield* resolveNewProjectsRoot,
           };
         });
 

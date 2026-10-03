@@ -509,6 +509,69 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("folds system prompt launch args into the appended system prompt", () => {
+    const promptDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-system-prompt-"));
+    const promptFile = NodePath.join(promptDir, "SYSTEM.md");
+    NodeFS.writeFileSync(promptFile, "From the file.");
+    const harness = makeHarness({
+      claudeConfig: {
+        launchArgs: `--append-system-prompt "From the flag." --append-system-prompt-file ${promptFile} --verbose`,
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.deepEqual(createInput?.options.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+        append: [
+          buildRuntimeInstructions({ harness: "Claude Code" }),
+          "From the flag.",
+          "From the file.",
+        ].join("\n\n"),
+      });
+      // The SDK's initialize request would replace argv system prompts, so
+      // neither flag reaches the CLI.
+      assert.deepEqual(createInput?.options.extraArgs, {
+        verbose: null,
+        "thinking-display": "summarized",
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("fails session start when the system prompt file is unreadable", () => {
+    const missingFile = NodePath.join(NodeOS.tmpdir(), "claude-system-prompt-missing", "NOPE.md");
+    const harness = makeHarness({
+      claudeConfig: { launchArgs: `--append-system-prompt-file ${missingFile}` },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ProviderAdapterValidationError);
+      assert.include(error.message, missingFile);
+      assert.isUndefined(harness.getLastCreateQueryInput());
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("loads Claude filesystem settings sources for SDK sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

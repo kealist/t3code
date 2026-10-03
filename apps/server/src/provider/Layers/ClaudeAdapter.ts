@@ -87,6 +87,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { expandHomePathWith } from "../../pathExpansion.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
@@ -4907,8 +4908,35 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const {
         "permission-mode": launchArgPermissionMode,
         "dangerously-skip-permissions": launchArgSkipPermissions,
+        "append-system-prompt": launchArgAppendSystemPrompt,
+        "append-system-prompt-file": launchArgAppendSystemPromptFile,
         ...extraArgs
       } = parseCliArgs(claudeSettings.launchArgs).flags;
+      // The SDK sends T3's `append` in its initialize request, which replaces
+      // any --append-system-prompt(-file) passed through argv, so system prompt
+      // launch args are folded into that `append` instead of passed through.
+      const launchArgAppendSystemPromptFileText =
+        typeof launchArgAppendSystemPromptFile === "string"
+          ? yield* fileSystem
+              .readFileString(expandHomePathWith(launchArgAppendSystemPromptFile, path))
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterValidationError({
+                      provider: PROVIDER,
+                      operation: "startSession",
+                      issue: `Could not read --append-system-prompt-file '${launchArgAppendSystemPromptFile}': ${cause.message}`,
+                    }),
+                ),
+              )
+          : undefined;
+      const systemPromptAppend = [
+        buildRuntimeInstructions({ harness: "Claude Code" }),
+        typeof launchArgAppendSystemPrompt === "string" ? launchArgAppendSystemPrompt : undefined,
+        launchArgAppendSystemPromptFileText,
+      ]
+        .filter((part): part is string => part !== undefined && part.trim() !== "")
+        .join("\n\n");
       const selectedModel =
         input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
       const modelSelection = selectedModel
@@ -4991,7 +5019,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "preset",
           preset: "claude_code",
           // Model and effort can change after this session-level prompt is set.
-          append: buildRuntimeInstructions({ harness: "Claude Code" }),
+          append: systemPromptAppend,
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is

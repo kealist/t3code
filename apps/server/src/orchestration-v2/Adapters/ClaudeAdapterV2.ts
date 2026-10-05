@@ -7004,17 +7004,15 @@ export function makeClaudeAdapterV2(
           ];
           const appendSystemPromptFileText =
             typeof appendSystemPromptFile === "string"
-              ? yield* fileSystem
-                  .readFileString(expandHomePath(appendSystemPromptFile))
-                  .pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new ClaudeAgentSdkQueryRunnerError({
-                          method: "readAppendSystemPromptFile",
-                          cause,
-                        }),
-                    ),
-                  )
+              ? yield* fileSystem.readFileString(expandHomePath(appendSystemPromptFile)).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ClaudeAgentSdkQueryRunnerError({
+                        method: "readAppendSystemPromptFile",
+                        cause,
+                      }),
+                  ),
+                )
               : undefined;
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,

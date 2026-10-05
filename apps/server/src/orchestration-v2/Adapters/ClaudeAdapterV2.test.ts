@@ -190,7 +190,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       cwd: "/workspace",
       settings: {
         ...DEFAULT_CLAUDE_SETTINGS,
-        launchArgs: "--append-system-prompt \"Inline rules\" --append-system-prompt-file ~/rules.md",
+        launchArgs: '--append-system-prompt "Inline rules" --append-system-prompt-file ~/rules.md',
       },
       appendSystemPromptFileText: "File rules",
     });

@@ -72,7 +72,9 @@ it.effect("attributes a launched thread's first message to the calling thread", 
         },
       }),
       Layer.mock(Project.ProjectService)({}),
-      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: Effect.succeed("/projects") }),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: Effect.succeed("/projects"),
+      }),
       NodeServices.layer,
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-source-link-" }).pipe(
         Layer.provide(NodeServices.layer),
@@ -323,7 +325,9 @@ const clientLaunchHarness = (input: {
             : Option.none(),
         ),
     }),
-    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: Effect.succeed("/projects"),
+    }),
     NodeServices.layer,
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-client-launch-" }).pipe(
       Layer.provide(NodeServices.layer),

@@ -816,6 +816,8 @@ export function makeClaudeQueryOptions(input: {
   readonly attachmentsDir?: string;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
+  /** The text of the `--append-system-prompt-file` launch arg, read by the caller. */
+  readonly appendSystemPromptFileText?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   readonly tools?: ClaudeAgentSdkQueryTools;
@@ -831,6 +833,10 @@ export function makeClaudeQueryOptions(input: {
   const {
     "permission-mode": launchArgPermissionMode,
     "dangerously-skip-permissions": launchArgSkipPermissions,
+    // The SDK sends its own systemPrompt.append, which overrides these CLI
+    // flags, so they are folded into that append below instead.
+    "append-system-prompt": launchArgAppendSystemPrompt,
+    "append-system-prompt-file": _launchArgAppendSystemPromptFile,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
   const requestThinkingSummaries =
@@ -908,9 +914,14 @@ export function makeClaudeQueryOptions(input: {
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
-      append:
+      append: [
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+          (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+        typeof launchArgAppendSystemPrompt === "string" ? launchArgAppendSystemPrompt : undefined,
+        input.appendSystemPromptFileText,
+      ]
+        .filter((part): part is string => part !== undefined && part.trim() !== "")
+        .join("\n\n"),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -7120,10 +7131,26 @@ export function makeClaudeAdapterV2(
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const appendSystemPromptFile = parseCliArgs(adapterOptions.settings.launchArgs).flags[
+            "append-system-prompt-file"
+          ];
+          const appendSystemPromptFileText =
+            typeof appendSystemPromptFile === "string"
+              ? yield* fileSystem.readFileString(expandHomePath(appendSystemPromptFile)).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ClaudeAgentSdkQueryRunnerError({
+                        method: "readAppendSystemPromptFile",
+                        cause,
+                      }),
+                  ),
+                )
+              : undefined;
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
+            ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,

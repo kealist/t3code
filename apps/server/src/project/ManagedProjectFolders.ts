@@ -26,6 +26,8 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
+import { expandHomePathWith } from "../pathExpansion.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectService from "./ProjectService.ts";
@@ -107,8 +109,11 @@ export class ManagedProjectFolders extends Context.Service<
       readonly threadId: ThreadId;
       readonly text: string;
     }) => Effect.Effect<Option.Option<string>, ScratchFolderError>;
-    /** The folder that holds projects started from just a name. */
-    readonly namedProjectsRoot: string;
+    /**
+     * The folder that holds projects started from just a name: the
+     * `newProjectsDirectory` setting when set, else `<baseDir>/projects`.
+     */
+    readonly namedProjectsRoot: Effect.Effect<string>;
     /**
      * Starts a project from just a name: claims `<namedProjectsRoot>/<slug>`
      * (adding `-2`, `-3`, ... when taken), makes it a Git repository with a
@@ -228,6 +233,7 @@ const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const projects = yield* ProjectService.ProjectService;
   const crypto = yield* Crypto.Crypto;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
 
   /**
    * Claims the first free folder among `folderFor(1)`, `folderFor(2)`, ...,
@@ -373,16 +379,27 @@ const make = Effect.gen(function* () {
   // Projects started from just a name live beside Scratch and worktrees, away
   // from folders the user organizes by hand. A nested repository is fine here
   // (unlike Scratch) because each project gets its own `git init`.
-  const namedProjectsRoot = path.resolve(config.baseDir, "projects");
+  // The newProjectsDirectory setting moves them elsewhere; it is read on each
+  // use, so a change applies to the next project without a restart.
+  const defaultNamedProjectsRoot = path.resolve(config.baseDir, "projects");
+  const namedProjectsRoot = serverSettings.getSettings.pipe(
+    Effect.map((settings) =>
+      settings.newProjectsDirectory === ""
+        ? defaultNamedProjectsRoot
+        : path.resolve(expandHomePathWith(settings.newProjectsDirectory, path)),
+    ),
+    Effect.orElseSucceed(() => defaultNamedProjectsRoot),
+  );
 
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,
   ) {
+    const root = yield* namedProjectsRoot;
     yield* fileSystem
-      .makeDirectory(namedProjectsRoot, { recursive: true })
+      .makeDirectory(root, { recursive: true })
       .pipe(
         Effect.mapError(
-          (cause) => new NamedProjectFolderError({ folder: namedProjectsRoot, cause }),
+          (cause) => new NamedProjectFolderError({ folder: root, cause }),
         ),
       );
     const folderName = newProjectFolderName(name);
@@ -393,7 +410,7 @@ const make = Effect.gen(function* () {
             ? Option.none()
             : Option.some(
                 path.join(
-                  namedProjectsRoot,
+                  root,
                   attempt === 1 ? folderName : `${folderName}-${attempt}`,
                 ),
               ),
@@ -402,7 +419,7 @@ const make = Effect.gen(function* () {
     );
     if (Option.isSome(claimed)) return claimed.value;
     return yield* new NamedProjectFolderError({
-      folder: path.join(namedProjectsRoot, folderName),
+      folder: path.join(root, folderName),
       cause: `Every folder name for "${folderName}" is taken.`,
     });
   });

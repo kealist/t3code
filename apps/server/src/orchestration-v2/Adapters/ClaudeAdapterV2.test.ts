@@ -184,6 +184,24 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.notInclude(options.settings ?? {}, { showThinkingSummaries: true });
   });
 
+  it("folds system prompt launch args into the appended system prompt", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "prompt-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: {
+        ...DEFAULT_CLAUDE_SETTINGS,
+        launchArgs: '--append-system-prompt "Inline rules" --append-system-prompt-file ~/rules.md',
+      },
+      appendSystemPromptFileText: "File rules",
+    });
+    const systemPrompt = options.systemPrompt as { readonly append?: string };
+    assert.isTrue(systemPrompt.append?.endsWith("\n\nInline rules\n\nFile rules"));
+    assert.isUndefined(options.extraArgs?.["append-system-prompt"]);
+    assert.isUndefined(options.extraArgs?.["append-system-prompt-file"]);
+  });
+
   it("does not enable thinking when the model option disables it", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: {

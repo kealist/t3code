@@ -1585,9 +1585,16 @@ function OpenCommandPaletteDialog(props: {
 
   /** Folder that holds an environment's name-only projects, or null when it has none. */
   const newProjectsRootFor = useCallback(
-    (environmentId: EnvironmentId | null): string | null =>
-      environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
-        ?.newProjectsRoot ?? null,
+    (environmentId: EnvironmentId | null): string | null => {
+      const serverConfig = environments.find(
+        (environment) => environment.environmentId === environmentId,
+      )?.serverConfig;
+      if (!serverConfig?.newProjectsRoot) return null;
+      // The config snapshot is not resent on settings changes, so a newer
+      // newProjectsDirectory setting wins over the snapshot's root.
+      const configured = serverConfig.settings?.newProjectsDirectory?.trim() ?? "";
+      return configured === "" ? serverConfig.newProjectsRoot : configured;
+    },
     [environments],
   );
 

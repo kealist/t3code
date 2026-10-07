@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as RuntimeLayer from "../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -58,6 +59,8 @@ const layerRealGit = GitVcsDriver.layer.pipe(Layer.provide(VcsProcess.layer));
 interface HarnessOptions {
   /** A git driver for failures real git cannot produce on demand. */
   readonly git?: Layer.Layer<GitVcsDriver.GitVcsDriver>;
+  /** Server settings for the data dir, such as a `newProjectsDirectory`. */
+  readonly settings?: (baseDir: string) => Parameters<typeof ServerSettings.layerTest>[0];
   /** Wraps the real ProjectService, for failures it cannot produce on demand. */
   readonly projects?: (
     real: ProjectService.ProjectService["Service"],
@@ -84,6 +87,7 @@ const layer = (baseDir: string, options?: HarnessOptions) =>
     Layer.provideMerge(layerGitWorkflow),
     Layer.provideMerge(options?.git ?? layerRealGit),
     Layer.provideMerge(SqlitePersistence.layerMemory),
+    Layer.provideMerge(ServerSettings.layerTest(options?.settings?.(baseDir))),
     Layer.provideMerge(ServerConfig.layerTest(baseDir, baseDir)),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -343,7 +347,7 @@ it.effect("starts a named project as a committed repository, and suffixes a take
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const root = path.resolve(baseDir, "projects");
-        assert.equal(folders.namedProjectsRoot, root);
+        assert.equal(yield* folders.namedProjectsRoot, root);
 
         const first = yield* folders.createNamedProject({ name: "Pinball Stats" });
         const second = yield* folders.createNamedProject({ name: "pinball stats" });
@@ -375,6 +379,26 @@ it.effect("starts a named project as a committed repository, and suffixes a take
         assert.equal(yield* gitOutput(first.workspaceRoot, ["status", "--porcelain"]), "");
       }),
     ),
+  ),
+);
+
+it.effect("starts named projects in the newProjectsDirectory setting", () =>
+  withScratch(
+    ({ baseDir }) =>
+      withGitEnv(
+        TEST_IDENTITY,
+        Effect.gen(function* () {
+          const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+          const path = yield* Path.Path;
+          const root = path.resolve(baseDir, "elsewhere", "code");
+          assert.equal(yield* folders.namedProjectsRoot, root);
+
+          const created = yield* folders.createNamedProject({ name: "Pinball Stats" });
+
+          assert.equal(created.workspaceRoot, path.join(root, "pinball-stats"));
+        }),
+      ),
+    { settings: (baseDir) => ({ newProjectsDirectory: `${baseDir}/elsewhere/code` }) },
   ),
 );
 
@@ -439,7 +463,7 @@ it.effect("keeps a folder that another project owns when the create conflicts", 
         const projects = yield* ProjectService.ProjectService;
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const taken = path.join(folders.namedProjectsRoot, "taken");
+        const taken = path.join(yield* folders.namedProjectsRoot, "taken");
         // A project registered at this path some other way (by hand, or a
         // client that predates the claim) owns the folder the create claims.
         yield* projects.create({
